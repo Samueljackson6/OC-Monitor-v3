@@ -14,6 +14,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from app.config import settings
 from app.database import init_db
 from app.api.metrics import router as metrics_router
+from app.api.agents import router as agents_router
+from app.api.alerts import router as alerts_router
 
 # 配置日志
 logging.basicConfig(
@@ -86,6 +88,8 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(metrics_router, prefix=f"/{settings.API_PREFIX}")
+app.include_router(agents_router, prefix=f"/{settings.API_PREFIX}")
+app.include_router(alerts_router, prefix=f"/{settings.API_PREFIX}")
 
 
 # 根路径

@@ -9,6 +9,12 @@ import {
   LineChart,
   Grid,
   Col,
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  TableHeaderCell,
 } from '@tremor/react'
 
 interface MetricData {
@@ -25,6 +31,25 @@ interface HistoryData {
   cpu: number
   memory: number
   disk: number
+}
+
+interface AgentSummary {
+  agent_id: string
+  agent_name: string | null
+  status: string
+  latest_memory: number | null
+  latest_cpu: number | null
+  last_seen: string | null
+}
+
+interface AlertOut {
+  id: number
+  alert_type: string
+  severity: string
+  title: string
+  message: string | null
+  is_resolved: boolean
+  created_at: string
 }
 
 function App() {
