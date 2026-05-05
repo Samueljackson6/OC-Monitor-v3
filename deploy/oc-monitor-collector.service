@@ -1,0 +1,19 @@
+[Unit]
+Description=OC-Monitor Collector
+After=network.target oc-monitor-api.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/oc-monitor/agent
+Environment="PATH=/opt/oc-monitor/venv/bin"
+EnvironmentFile=/opt/oc-monitor/deploy/.env.production
+ExecStart=/opt/oc-monitor/venv/bin/python collector_optimized.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/oc-monitor/collector.log
+StandardError=append:/var/log/oc-monitor/collector-error.log
+
+[Install]
+WantedBy=multi-user.target

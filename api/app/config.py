@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     API_PREFIX: str = "api/v1"
     
     # 数据库配置
-    DATABASE_URL: str = "sqlite+aiosqlite:///data/monitor.db"
+    DATABASE_URL: str = "sqlite+aiosqlite:////home/samuel/.openclaw/workspace/dev_agent/oc-monitor-v3/data/monitor.db"
     
     # Redis 配置（可选）
     REDIS_URL: Optional[str] = None

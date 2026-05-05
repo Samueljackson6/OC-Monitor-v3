@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # API 服务
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: oc-monitor-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://ocmonitor:password@postgres:5432/ocmonitor
+      - SECRET_KEY=your-secret-key-change-in-production
+    depends_on:
+      - postgres
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/metrics/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 采集器
+  collector:
+    build:
+      context: .
+      dockerfile: Dockerfile.collector
+    container_name: oc-monitor-collector
+    environment:
+      - PUSH_API_URL=http://api:8000/api/v1/metrics/batch
+    depends_on:
+      - api
+    restart: always
+    # 使用宿主机网络以监控宿主机
+    network_mode: host
+
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:16-alpine
+    container_name: oc-monitor-postgres
+    environment:
+      - POSTGRES_USER=ocmonitor
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=ocmonitor
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ocmonitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Nginx 反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: oc-monitor-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./ui/dist:/usr/share/nginx/html:ro
+    depends_on:
+      - api
+    restart: always
+
+volumes:
+  postgres_data:

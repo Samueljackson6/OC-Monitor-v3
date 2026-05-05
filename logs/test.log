@@ -1,0 +1,15 @@
+INFO:     Started server process [436818]
+INFO:     Waiting for application startup.
+2026-05-05 16:14:40,659 - app.main - INFO - 🚀 OC-Monitor v3.0.0 启动中...
+2026-05-05 16:14:40,661 - app.main - INFO - ✅ 数据库初始化完成
+2026-05-05 16:14:40,661 - app.main - INFO - 🌐 API 前缀: /api/v1
+2026-05-05 16:14:40,661 - app.main - INFO - ✅ OC-Monitor 启动完成
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:45544 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45546 - "GET /api/v1/metrics/health HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-05-05 16:14:45,289 - app.main - INFO - 👋 OC-Monitor 关闭中...
+INFO:     Application shutdown complete.
+INFO:     Finished server process [436818]
