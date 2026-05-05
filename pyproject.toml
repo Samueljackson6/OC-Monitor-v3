@@ -1,0 +1,36 @@
+[project]
+name = "oc-monitor-v3"
+version = "3.0.0"
+description = "OC-Monitor v3.0 - Lightweight OpenClaw Monitoring System"
+authors = [{name = "dev-main", email = "dev-main@openclaw.local"}]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "httpx>=0.28.0",
+    "psutil>=6.1.0",
+    "asyncpg>=0.30.0",
+    "redis>=5.2.0",
+    "pydantic>=2.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "locust>=2.32.0",
+    "memory-profiler>=0.61.0",
+]
+
+[build-system]
+requires = ["setuptools>=75.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
