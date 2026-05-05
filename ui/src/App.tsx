@@ -55,6 +55,8 @@ interface AlertOut {
 function App() {
   const [realtime, setRealtime] = useState<MetricData | null>(null)
   const [history, setHistory] = useState<HistoryData[]>([])
+  const [agents, setAgents] = useState<AgentSummary[]>([])
+  const [alerts, setAlerts] = useState<AlertOut[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -85,13 +87,43 @@ function App() {
     }
   }
 
+  // 获取 Agent 列表
+  const fetchAgents = async () => {
+    try {
+      const response = await fetch('/api/v1/agents/list')
+      if (!response.ok) throw new Error('获取 Agent 列表失败')
+      const data = await response.json()
+      setAgents(data)
+    } catch (err) {
+      console.error('获取 Agent 列表失败:', err)
+    }
+  }
+
+  // 获取告警列表
+  const fetchAlerts = async () => {
+    try {
+      const response = await fetch('/api/v1/alerts?is_resolved=false&limit=10')
+      if (!response.ok) throw new Error('获取告警列表失败')
+      const data = await response.json()
+      setAlerts(data)
+    } catch (err) {
+      console.error('获取告警列表失败:', err)
+    }
+  }
+
   useEffect(() => {
     // 初始加载
     fetchRealtime()
     fetchHistory()
+    fetchAgents()
+    fetchAlerts()
 
     // 每5秒刷新
-    const interval = setInterval(fetchRealtime, 5000)
+    const interval = setInterval(() => {
+      fetchRealtime()
+      fetchAgents()
+      fetchAlerts()
+    }, 5000)
 
     return () => clearInterval(interval)
   }, [])
@@ -172,7 +204,7 @@ function App() {
         </Grid>
 
         {/* 历史趋势图 */}
-        <Card>
+        <Card className="mb-6">
           <Title>24小时趋势</Title>
           <LineChart
             className="h-72 mt-4"
@@ -183,6 +215,74 @@ function App() {
             valueFormatter={(value) => `${value.toFixed(1)}%`}
             yAxisWidth={48}
           />
+        </Card>
+
+        {/* Agent 列表 */}
+        <Card className="mb-6">
+          <Title>Agent 状态</Title>
+          <Table className="mt-4">
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>Agent ID</TableHeaderCell>
+                <TableHeaderCell>名称</TableHeaderCell>
+                <TableHeaderCell>状态</TableHeaderCell>
+                <TableHeaderCell>内存</TableHeaderCell>
+                <TableHeaderCell>CPU</TableHeaderCell>
+                <TableHeaderCell>最后更新</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {agents.map((agent) => (
+                <TableRow key={agent.agent_id}>
+                  <TableCell>{agent.agent_id}</TableCell>
+                  <TableCell>{agent.agent_name || '-'}</TableCell>
+                  <TableCell>
+                    <Badge color={agent.status === 'online' ? 'green' : 'red'}>
+                      {agent.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{agent.latest_memory ? `${agent.latest_memory.toFixed(1)} MB` : '-'}</TableCell>
+                  <TableCell>{agent.latest_cpu ? `${agent.latest_cpu.toFixed(1)}%` : '-'}</TableCell>
+                  <TableCell>{agent.last_seen ? new Date(agent.last_seen).toLocaleString() : '-'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+
+        {/* 告警列表 */}
+        <Card>
+          <Title>活跃告警</Title>
+          {alerts.length === 0 ? (
+            <Text className="mt-4">暂无活跃告警</Text>
+          ) : (
+            <Table className="mt-4">
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell>类型</TableHeaderCell>
+                  <TableHeaderCell>严重程度</TableHeaderCell>
+                  <TableHeaderCell>标题</TableHeaderCell>
+                  <TableHeaderCell>时间</TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {alerts.map((alert) => (
+                  <TableRow key={alert.id}>
+                    <TableCell>{alert.alert_type}</TableCell>
+                    <TableCell>
+                      <Badge 
+                        color={alert.severity === 'critical' ? 'red' : alert.severity === 'warning' ? 'yellow' : 'blue'}
+                      >
+                        {alert.severity}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{alert.title}</TableCell>
+                    <TableCell>{new Date(alert.created_at).toLocaleString()}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </Card>
 
         {/* 错误提示 */}
