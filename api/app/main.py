@@ -1,114 +1,83 @@
-"""
-OC-Monitor v3.0 - FastAPI 主入口
-"""
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+"""OC-Monitor v3.0 FastAPI entrypoint."""
 from contextlib import asynccontextmanager
+from pathlib import Path
 import logging
 import sys
-from pathlib import Path
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-# 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.config import settings
 from app.database import init_db
+from app.api.auth import router as auth_router
+from app.api.config import router as config_router
 from app.api.metrics import router as metrics_router
 from app.api.agents import router as agents_router
 from app.api.alerts import router as alerts_router
 
-# 配置日志
+
 logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
 
+def _cors_origins() -> list[str]:
+    if settings.CORS_ORIGINS.strip() == "*":
+        return ["*"]
+    return [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期"""
-    # 启动时
-    logger.info(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} 启动中...")
-    
-    # 初始化数据库
+    Path("./data").mkdir(exist_ok=True)
+    Path(settings.LOG_DIR).mkdir(parents=True, exist_ok=True)
+    logger.info("Starting %s v%s", settings.APP_NAME, settings.APP_VERSION)
     await init_db()
-    logger.info("✅ 数据库初始化完成")
-    
-    # 创建数据目录
-    data_dir = Path("./data")
-    data_dir.mkdir(exist_ok=True)
-    
-    logger.info(f"🌐 API 前缀: /{settings.API_PREFIX}")
-    logger.info(f"✅ {settings.APP_NAME} 启动完成")
-    
+    logger.info("Database initialized")
     yield
-    
-    # 关闭时
-    logger.info(f"👋 {settings.APP_NAME} 关闭中...")
+    logger.info("Stopping %s", settings.APP_NAME)
 
 
-# 创建应用
 app = FastAPI(
     title=settings.APP_NAME,
-    description="""
-## OC-Monitor v3.0 API
-
-轻量级、高性能的 OpenClaw 监控系统 API
-
-### 功能模块
-- 📊 **指标接收**: 接收采集端推送的监控数据
-- 📈 **实时数据**: 获取最新监控数据
-- 📉 **历史趋势**: 获取历史数据趋势
-
-### 采集端接入
-```bash
-POST /api/v1/metrics/batch
-{
-  "metrics": [
-    {"cpu": 50.0, "memory": 60.0, "disk": 70.0, "gateway_status": true, "timestamp": 1234567890.0}
-  ]
-}
-```
-""",
+    description="Lightweight OpenClaw monitoring API.",
     version=settings.APP_VERSION,
     lifespan=lifespan,
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
 )
 
-# CORS 配置
+origins = _cors_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=origins,
+    allow_credentials=origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 注册路由
-app.include_router(metrics_router, prefix=f"/{settings.API_PREFIX}")
-app.include_router(agents_router, prefix=f"/{settings.API_PREFIX}")
-app.include_router(alerts_router, prefix=f"/{settings.API_PREFIX}")
+api_prefix = f"/{settings.API_PREFIX.strip('/')}"
+app.include_router(auth_router, prefix=api_prefix)
+app.include_router(config_router, prefix=api_prefix)
+app.include_router(metrics_router, prefix=api_prefix)
+app.include_router(agents_router, prefix=api_prefix)
+app.include_router(alerts_router, prefix=api_prefix)
 
 
-# 根路径
 @app.get("/")
 async def root():
-    """根路径"""
     return {
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
         "docs": "/docs",
-        "api": f"/{settings.API_PREFIX}"
+        "api": api_prefix,
     }
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True
-    )
+
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

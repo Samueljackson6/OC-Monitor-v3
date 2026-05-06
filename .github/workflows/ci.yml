@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [master, main]
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail on runtime artifacts
+        run: |
+          bad=$(git ls-files | grep -E '(^venv/|^logs/|^data/|__pycache__/|\.pyc$|\.pid$|\.db$|\.sqlite$|\.sqlite3$|deploy/\.env\.production$)' || true)
+          if [ -n "$bad" ]; then
+            echo "$bad"
+            exit 1
+          fi
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r api/requirements.txt pytest pytest-asyncio
+      - name: Run tests
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./data/test_monitor.db
+          SECRET_KEY: test-secret-key
+          INITIAL_ADMIN_PASSWORD: test-admin-password
+          INGEST_TOKEN: test-ingest-token
+        run: pytest tests/unit tests/integration -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build UI
+        working-directory: ui
+        run: |
+          npm install
+          npm run build

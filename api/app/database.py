@@ -1,39 +1,25 @@
 """
-OC-Monitor v3.0 - 数据库连接
+OC-Monitor v3.0 - database connection.
 """
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 from app.config import settings
 
-# 创建异步引擎
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DEBUG,
-    future=True
-)
-
-# 创建异步会话工厂
-AsyncSessionLocal = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
 
 Base = declarative_base()
 
+engine = create_async_engine(settings.DATABASE_URL, echo=settings.DEBUG, future=True)
+AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
 
 async def init_db():
-    """初始化数据库"""
+    """Create tables for lightweight installs; production should use migrations."""
+    from app import models  # noqa: F401
     async with engine.begin() as conn:
-        # 导入模型
-        from app.models import ServerMetric, AgentMetric, User, Alert
-        
-        # 创建所有表
         await conn.run_sync(Base.metadata.create_all)
 
 
 async def get_db():
-    """获取数据库会话"""
     async with AsyncSessionLocal() as session:
         try:
             yield session
