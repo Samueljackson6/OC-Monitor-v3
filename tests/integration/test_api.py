@@ -1,90 +1,92 @@
-"""
-OC-Monitor v3.0 - API 测试（简化版）
-使用内存数据库
-"""
-import pytest
+"""Integration tests for core API behavior."""
+import os
 import sys
-from pathlib import Path
 import time
+from pathlib import Path
+import pytest
 
-# 添加项目路径
+TEST_DB_PATH = Path("data/test_monitor.db").resolve()
+TEST_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+TEST_DB_PATH.unlink(missing_ok=True)
+
+os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{TEST_DB_PATH.as_posix()}"
+os.environ["SECRET_KEY"] = "test-secret-key"
+os.environ["INITIAL_ADMIN_PASSWORD"] = "test-admin-password"
+os.environ["INGEST_TOKEN"] = "test-ingest-token"
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "api"))
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-# 使用同步 SQLite 内存数据库测试
-from app.models import Base
 from app.main import app
+
+
+INGEST_HEADERS = {"x-oc-monitor-token": "test-ingest-token"}
 
 
 @pytest.fixture(scope="module")
 def client():
-    """创建测试客户端"""
-    # 创建内存数据库
-    from app.database import engine
-    
-    # 同步创建表
-    import sqlite3
-    conn = sqlite3.connect("data/monitor.db")
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS server_metrics (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cpu REAL NOT NULL,
-            memory REAL NOT NULL,
-            disk REAL NOT NULL,
-            gateway_status BOOLEAN DEFAULT 0,
-            timestamp REAL NOT NULL,
-            collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    """)
-    conn.commit()
-    conn.close()
-    
-    with TestClient(app) as c:
-        yield c
+    with TestClient(app) as test_client:
+        yield test_client
 
 
-class TestMetricsAPI:
-    """指标 API 测试"""
-    
+def auth_headers(client: TestClient) -> dict[str, str]:
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "admin", "password": "test-admin-password"},
+    )
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+class TestCoreAPI:
     def test_root(self, client):
-        """测试根路径"""
         response = client.get("/")
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "OC-Monitor"
         assert data["version"] == "3.0.0"
-    
+
     def test_health_check(self, client):
-        """测试健康检查"""
         response = client.get("/api/v1/metrics/health")
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
 
+    def test_ingest_token_required_for_metric_write(self, client):
+        payload = {"metrics": [{"cpu": 10, "memory": 20, "disk": 30, "gateway_status": True, "timestamp": time.time()}]}
+        unauthorized = client.post("/api/v1/metrics/batch", json=payload)
+        assert unauthorized.status_code == 401
+        authorized = client.post("/api/v1/metrics/batch", json=payload, headers=INGEST_HEADERS)
+        assert authorized.status_code == 200
+        assert authorized.json()["received"] == 1
 
-class TestAPIDocs:
-    """API 文档测试"""
-    
-    def test_swagger_docs(self, client):
-        """测试 Swagger 文档"""
-        response = client.get("/docs")
-        assert response.status_code == 200
-    
-    def test_redoc(self, client):
-        """测试 ReDoc"""
-        response = client.get("/redoc")
-        assert response.status_code == 200
-    
-    def test_openapi_json(self, client):
-        """测试 OpenAPI JSON"""
-        response = client.get("/openapi.json")
+    def test_realtime_after_ingest(self, client):
+        response = client.get("/api/v1/metrics/realtime")
         assert response.status_code == 200
         data = response.json()
-        assert "openapi" in data
-        assert "paths" in data
+        assert data["cpu"] == 10
+        assert data["gateway_status"] is True
+
+    def test_auth_and_protected_config(self, client):
+        assert client.get("/api/v1/config").status_code == 401
+        response = client.get("/api/v1/config", headers=auth_headers(client))
+        assert response.status_code == 200
+        assert "data_retention_days" in response.json()
+
+    def test_public_stats_and_runtime(self, client):
+        assert client.get("/api/v1/config/runtime").status_code == 200
+        response = client.get("/api/v1/config/stats")
+        assert response.status_code == 200
+        assert response.json()["server_metrics"] >= 1
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "-s"])
+class TestAPIDocs:
+    def test_swagger_docs(self, client):
+        assert client.get("/docs").status_code == 200
+
+    def test_redoc(self, client):
+        assert client.get("/redoc").status_code == 200
+
+    def test_openapi_json(self, client):
+        response = client.get("/openapi.json")
+        assert response.status_code == 200
+        assert "paths" in response.json()

@@ -1,42 +1,36 @@
 """
-OC-Monitor v3.0 - 配置管理
+OC-Monitor v3.0 - application settings.
 """
-from pydantic_settings import BaseSettings
 from typing import Optional
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """应用配置"""
-    
-    # 应用信息
     APP_NAME: str = "OC-Monitor"
     APP_VERSION: str = "3.0.0"
     DEBUG: bool = False
-    
-    # API 配置
+    ENVIRONMENT: str = "development"
     API_PREFIX: str = "api/v1"
-    
-    # 数据库配置
-    DATABASE_URL: str = "sqlite+aiosqlite:////home/samuel/.openclaw/workspace/dev_agent/oc-monitor-v3/data/monitor.db"
-    
-    # Redis 配置（可选）
+    CORS_ORIGINS: str = "*"
+    DATABASE_URL: str = "sqlite+aiosqlite:///./data/monitor.db"
     REDIS_URL: Optional[str] = None
-    
-    # JWT 配置
-    SECRET_KEY: str = "your-secret-key-change-in-production"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 小时
-    
-    # 初始管理员账户
+    SECRET_KEY: str = "change-me-in-env"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
+    AUTH_REQUIRED: bool = True
     INITIAL_ADMIN_USERNAME: str = "admin"
-    INITIAL_ADMIN_PASSWORD: str = "admin123"
-    
-    # 日志配置
+    INITIAL_ADMIN_PASSWORD: str = ""
+    INGEST_TOKEN: Optional[str] = None
     LOG_LEVEL: str = "INFO"
     LOG_DIR: str = "./logs"
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    COLLECTOR_INTERVAL_MIN: int = 5
+    COLLECTOR_INTERVAL_MAX: int = 60
+    DATA_RETENTION_DAYS: int = 30
+    RESOLVED_ALERT_RETENTION_DAYS: int = 30
+    ALERT_CPU_THRESHOLD: float = 80.0
+    ALERT_MEMORY_THRESHOLD: float = 85.0
+    ALERT_DISK_THRESHOLD: float = 90.0
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 
 settings = Settings()
