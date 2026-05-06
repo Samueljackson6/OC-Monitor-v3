@@ -1,22 +1,7 @@
-import { useState, useEffect } from 'react'
-import {
-  Card,
-  Title,
-  Text,
-  Metric,
-  Flex,
-  Badge,
-  LineChart,
-  Grid,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-  TableHeaderCell,
-} from '@tremor/react'
+import { useEffect, useMemo, useState } from 'react'
+import './index.css'
 
-interface MetricData {
+type MetricData = {
   cpu: number
   memory: number
   disk: number
@@ -25,14 +10,14 @@ interface MetricData {
   collected_at?: string
 }
 
-interface HistoryData {
+type HistoryData = {
   time: string
   cpu: number
   memory: number
   disk: number
 }
 
-interface AgentSummary {
+type AgentSummary = {
   agent_id: string
   agent_name: string | null
   status: string
@@ -41,7 +26,7 @@ interface AgentSummary {
   last_seen: string | null
 }
 
-interface AlertOut {
+type AlertOut = {
   id: number
   alert_type: string
   severity: string
@@ -51,247 +36,381 @@ interface AlertOut {
   created_at: string
 }
 
+type RuntimeInfo = {
+  app_name: string
+  app_version: string
+  environment: string
+  auth_required: boolean
+  ingest_token_configured: boolean
+  updated_at: string
+}
+
+type LoadState = 'loading' | 'ready' | 'error'
+
+const endpoints = {
+  realtime: '/api/v1/metrics/realtime',
+  history: '/api/v1/metrics/history?hours=24',
+  agents: '/api/v1/agents/list',
+  alerts: '/api/v1/alerts?is_resolved=false&limit=10',
+  stats: '/api/v1/config/stats',
+  runtime: '/api/v1/config/runtime',
+}
+
+function formatPercent(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) return '-'
+  return `${value.toFixed(1)}%`
+}
+
+function formatNumber(value: number | null | undefined, suffix = '') {
+  if (value === null || value === undefined || Number.isNaN(value)) return '-'
+  return `${value.toFixed(1)}${suffix}`
+}
+
+function formatTime(value?: string | number | null) {
+  if (!value) return '-'
+  const date = typeof value === 'number' ? new Date(value * 1000) : new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function metricTone(value: number | null | undefined, warning = 60, danger = 80) {
+  if (value === null || value === undefined) return 'muted'
+  if (value >= danger) return 'danger'
+  if (value >= warning) return 'warning'
+  return 'ok'
+}
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const response = await fetch(url, { headers: { Accept: 'application/json' } })
+  if (!response.ok) throw new Error(`${url} ${response.status}`)
+  return response.json()
+}
+
+function StatusPill({ tone, children }: { tone: string; children: React.ReactNode }) {
+  return <span className={`status-pill status-${tone}`}>{children}</span>
+}
+
+function SummaryCard({
+  label,
+  value,
+  subLabel,
+  tone,
+  progress,
+}: {
+  label: string
+  value: string
+  subLabel: string
+  tone: string
+  progress?: number
+}) {
+  const width = Math.max(0, Math.min(progress ?? 0, 100))
+  return (
+    <section className="summary-card">
+      <div className="summary-topline">
+        <span>{label}</span>
+        <StatusPill tone={tone}>{subLabel}</StatusPill>
+      </div>
+      <strong>{value}</strong>
+      {progress !== undefined && (
+        <div className="meter" aria-hidden="true">
+          <span className={`meter-fill meter-${tone}`} style={{ width: `${width}%` }} />
+        </div>
+      )}
+    </section>
+  )
+}
+
+function TrendChart({ data }: { data: HistoryData[] }) {
+  const chartData = useMemo(() => data.slice(-96), [data])
+  const width = 920
+  const height = 300
+  const padding = { left: 46, right: 20, top: 24, bottom: 44 }
+  const plotWidth = width - padding.left - padding.right
+  const plotHeight = height - padding.top - padding.bottom
+
+  const toPoint = (item: HistoryData, index: number, key: keyof Pick<HistoryData, 'cpu' | 'memory' | 'disk'>) => {
+    const x = padding.left + (chartData.length <= 1 ? 0 : (index / (chartData.length - 1)) * plotWidth)
+    const y = padding.top + (1 - Math.max(0, Math.min(item[key], 100)) / 100) * plotHeight
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }
+
+  const makePoints = (key: keyof Pick<HistoryData, 'cpu' | 'memory' | 'disk'>) =>
+    chartData.map((item, index) => toPoint(item, index, key)).join(' ')
+
+  const axis = [0, 25, 50, 75, 100]
+  const labels = chartData.filter((_, index) => index === 0 || index === Math.floor(chartData.length / 2) || index === chartData.length - 1)
+
+  if (chartData.length === 0) {
+    return <div className="empty-chart">暂无趋势数据</div>
+  }
+
+  return (
+    <div className="chart-wrap">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="24 小时指标趋势">
+        {axis.map((tick) => {
+          const y = padding.top + (1 - tick / 100) * plotHeight
+          return (
+            <g key={tick}>
+              <line className="chart-grid" x1={padding.left} y1={y} x2={width - padding.right} y2={y} />
+              <text className="chart-label" x={padding.left - 12} y={y + 4} textAnchor="end">
+                {tick}%
+              </text>
+            </g>
+          )
+        })}
+        <polyline className="trend-line trend-cpu" points={makePoints('cpu')} />
+        <polyline className="trend-line trend-memory" points={makePoints('memory')} />
+        <polyline className="trend-line trend-disk" points={makePoints('disk')} />
+        {labels.map((item, index) => {
+          const sourceIndex = chartData.indexOf(item)
+          const x = padding.left + (chartData.length <= 1 ? 0 : (sourceIndex / (chartData.length - 1)) * plotWidth)
+          return (
+            <text key={`${item.time}-${index}`} className="chart-label chart-time" x={x} y={height - 14} textAnchor={index === 0 ? 'start' : index === labels.length - 1 ? 'end' : 'middle'}>
+              {item.time.slice(5)}
+            </text>
+          )
+        })}
+      </svg>
+      <div className="legend-row">
+        <span><i className="legend-dot cpu" />CPU</span>
+        <span><i className="legend-dot memory" />内存</span>
+        <span><i className="legend-dot disk" />磁盘</span>
+      </div>
+    </div>
+  )
+}
+
+function AgentTable({ agents }: { agents: AgentSummary[] }) {
+  if (agents.length === 0) {
+    return <div className="empty-state">暂无 Agent 上报</div>
+  }
+
+  return (
+    <div className="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Agent</th>
+            <th>名称</th>
+            <th>状态</th>
+            <th>内存</th>
+            <th>CPU</th>
+            <th>最近上报</th>
+          </tr>
+        </thead>
+        <tbody>
+          {agents.map((agent) => (
+            <tr key={agent.agent_id}>
+              <td className="mono">{agent.agent_id}</td>
+              <td>{agent.agent_name || '-'}</td>
+              <td>
+                <StatusPill tone={agent.status === 'online' ? 'ok' : 'danger'}>{agent.status || 'unknown'}</StatusPill>
+              </td>
+              <td>{formatNumber(agent.latest_memory, ' MB')}</td>
+              <td>{formatPercent(agent.latest_cpu)}</td>
+              <td>{formatTime(agent.last_seen)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function AlertList({ alerts }: { alerts: AlertOut[] }) {
+  if (alerts.length === 0) return <div className="empty-state">暂无活跃告警</div>
+
+  return (
+    <div className="alert-list">
+      {alerts.map((alert) => (
+        <article className="alert-row" key={alert.id}>
+          <div>
+            <strong>{alert.title}</strong>
+            <span>{alert.message || alert.alert_type}</span>
+          </div>
+          <StatusPill tone={alert.severity === 'critical' ? 'danger' : alert.severity === 'warning' ? 'warning' : 'info'}>
+            {alert.severity}
+          </StatusPill>
+          <time>{formatTime(alert.created_at)}</time>
+        </article>
+      ))}
+    </div>
+  )
+}
+
+function ConfigStrip({ runtime, stats }: { runtime: RuntimeInfo | null; stats: Record<string, number | string> | null }) {
+  return (
+    <section className="config-strip">
+      <div>
+        <span>运行环境</span>
+        <strong>{runtime?.environment || '-'}</strong>
+      </div>
+      <div>
+        <span>管理认证</span>
+        <strong>{runtime?.auth_required ? '已启用' : '未启用'}</strong>
+      </div>
+      <div>
+        <span>采集令牌</span>
+        <strong>{runtime?.ingest_token_configured ? '已配置' : '未配置'}</strong>
+      </div>
+      <div>
+        <span>指标总量</span>
+        <strong>{stats?.total_metrics ?? '-'}</strong>
+      </div>
+      <div>
+        <span>告警总量</span>
+        <strong>{stats?.total_alerts ?? '-'}</strong>
+      </div>
+    </section>
+  )
+}
+
 function App() {
   const [realtime, setRealtime] = useState<MetricData | null>(null)
   const [history, setHistory] = useState<HistoryData[]>([])
   const [agents, setAgents] = useState<AgentSummary[]>([])
   const [alerts, setAlerts] = useState<AlertOut[]>([])
-  const [loading, setLoading] = useState(true)
+  const [runtime, setRuntime] = useState<RuntimeInfo | null>(null)
+  const [stats, setStats] = useState<Record<string, number | string> | null>(null)
+  const [state, setState] = useState<LoadState>('loading')
   const [error, setError] = useState<string | null>(null)
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
-  // 获取实时数据
-  const fetchRealtime = async () => {
+  const refresh = async () => {
     try {
-      const response = await fetch('/api/v1/metrics/realtime')
-      if (!response.ok) throw new Error('获取数据失败')
-      const data = await response.json()
-      setRealtime(data)
+      const [metricData, historyData, agentData, alertData, runtimeData, statsData] = await Promise.all([
+        fetchJson<MetricData>(endpoints.realtime),
+        fetchJson<HistoryData[]>(endpoints.history),
+        fetchJson<AgentSummary[]>(endpoints.agents),
+        fetchJson<AlertOut[]>(endpoints.alerts),
+        fetchJson<RuntimeInfo>(endpoints.runtime),
+        fetchJson<Record<string, number | string>>(endpoints.stats),
+      ])
+      setRealtime(metricData)
+      setHistory(historyData)
+      setAgents(agentData)
+      setAlerts(alertData)
+      setRuntime(runtimeData)
+      setStats(statsData)
+      setLastRefresh(new Date())
       setError(null)
+      setState('ready')
     } catch (err) {
-      setError(err instanceof Error ? err.message : '未知错误')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // 获取历史数据
-  const fetchHistory = async () => {
-    try {
-      const response = await fetch('/api/v1/metrics/history?hours=24')
-      if (!response.ok) throw new Error('获取历史数据失败')
-      const data = await response.json()
-      setHistory(data)
-    } catch (err) {
-      console.error('获取历史数据失败:', err)
-    }
-  }
-
-  // 获取 Agent 列表
-  const fetchAgents = async () => {
-    try {
-      const response = await fetch('/api/v1/agents/list')
-      if (!response.ok) throw new Error('获取 Agent 列表失败')
-      const data = await response.json()
-      setAgents(data)
-    } catch (err) {
-      console.error('获取 Agent 列表失败:', err)
-    }
-  }
-
-  // 获取告警列表
-  const fetchAlerts = async () => {
-    try {
-      const response = await fetch('/api/v1/alerts?is_resolved=false&limit=10')
-      if (!response.ok) throw new Error('获取告警列表失败')
-      const data = await response.json()
-      setAlerts(data)
-    } catch (err) {
-      console.error('获取告警列表失败:', err)
+      setError(err instanceof Error ? err.message : '数据加载失败')
+      setState((current) => (current === 'loading' ? 'error' : current))
     }
   }
 
   useEffect(() => {
-    // 初始加载
-    fetchRealtime()
-    fetchHistory()
-    fetchAgents()
-    fetchAlerts()
-
-    // 每5秒刷新
-    const interval = setInterval(() => {
-      fetchRealtime()
-      fetchAgents()
-      fetchAlerts()
-    }, 5000)
-
-    return () => clearInterval(interval)
+    refresh()
+    const timer = window.setInterval(refresh, 15000)
+    return () => window.clearInterval(timer)
   }, [])
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Text>加载中...</Text>
-      </div>
-    )
-  }
-
-  if (error && !realtime) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card className="max-w-md">
-          <Title>错误</Title>
-          <Text>{error}</Text>
-        </Card>
-      </div>
-    )
-  }
+  const gatewayTone = realtime?.gateway_status ? 'ok' : 'danger'
+  const healthText = error ? '数据异常' : realtime?.gateway_status ? '运行中' : '需关注'
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* 标题 */}
-        <div className="mb-8">
-          <Title>OC-Monitor v3.0</Title>
-          <Text>轻量级、高性能的 OpenClaw 监控系统</Text>
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div className="brand-block">
+          <span className="brand-mark">OC</span>
+          <div>
+            <strong>OC-Monitor</strong>
+            <span>OpenClaw 控制台</span>
+          </div>
         </div>
+        <nav className="nav-list" aria-label="运行概览">
+          <a href="#overview">运行概览</a>
+          <a href="#agents">Agent 监控</a>
+          <a href="#alerts">告警</a>
+          <a href="#runtime">配置状态</a>
+        </nav>
+        <div className="sidebar-note">
+          <span>公网入口</span>
+          <strong>{runtime?.app_version || '3.0.0'}</strong>
+        </div>
+      </aside>
 
-        {/* 实时数据卡片 */}
-        <Grid numItemsSm={2} numItemsLg={4} className="gap-6 mb-8">
-          {/* CPU */}
-          <Card>
-            <Flex justifyContent="between" alignItems="center">
-              <Text>CPU</Text>
-              <Badge color={realtime && realtime.cpu > 80 ? 'red' : realtime && realtime.cpu > 60 ? 'yellow' : 'green'}>
-                {realtime ? `${realtime.cpu.toFixed(1)}%` : '-'}
-              </Badge>
-            </Flex>
-            <Metric>{realtime ? `${realtime.cpu.toFixed(1)}%` : '-'}</Metric>
-          </Card>
+      <section className="content-shell">
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">OpenClaw Operations</p>
+            <h1>监控与运行控制台</h1>
+            <span className="subline">最后刷新：{lastRefresh ? formatTime(lastRefresh.toISOString()) : '-'}</span>
+          </div>
+          <div className="topbar-actions">
+            <StatusPill tone={error ? 'danger' : gatewayTone}>{healthText}</StatusPill>
+            <button type="button" onClick={refresh}>刷新</button>
+          </div>
+        </header>
 
-          {/* 内存 */}
-          <Card>
-            <Flex justifyContent="between" alignItems="center">
-              <Text>内存</Text>
-              <Badge color={realtime && realtime.memory > 80 ? 'red' : realtime && realtime.memory > 60 ? 'yellow' : 'green'}>
-                {realtime && realtime.memory > 80 ? '高' : realtime && realtime.memory > 60 ? '中' : '低'}
-              </Badge>
-            </Flex>
-            <Metric>{realtime ? `${realtime.memory.toFixed(1)}%` : '-'}</Metric>
-          </Card>
-
-          {/* 磁盘 */}
-          <Card>
-            <Flex justifyContent="between" alignItems="center">
-              <Text>磁盘</Text>
-              <Badge color={realtime && realtime.disk > 80 ? 'red' : realtime && realtime.disk > 60 ? 'yellow' : 'green'}>
-                {realtime && realtime.disk > 80 ? '高' : realtime && realtime.disk > 60 ? '中' : '低'}
-              </Badge>
-            </Flex>
-            <Metric>{realtime ? `${realtime.disk.toFixed(1)}%` : '-'}</Metric>
-          </Card>
-
-          {/* Gateway 状态 */}
-          <Card>
-            <Flex justifyContent="between" alignItems="center">
-              <Text>Gateway</Text>
-              <Badge color={realtime && realtime.gateway_status ? 'green' : 'red'}>
-                {realtime && realtime.gateway_status ? '运行中' : '已停止'}
-              </Badge>
-            </Flex>
-            <Metric>{realtime && realtime.gateway_status ? '✓' : '✗'}</Metric>
-          </Card>
-        </Grid>
-
-        {/* 历史趋势图 */}
-        <Card className="mb-6">
-          <Title>24小时趋势</Title>
-          <LineChart
-            className="h-72 mt-4"
-            data={history}
-            index="time"
-            categories={['cpu', 'memory', 'disk']}
-            colors={['blue', 'green', 'purple']}
-            valueFormatter={(value) => `${value.toFixed(1)}%`}
-            yAxisWidth={48}
-          />
-        </Card>
-
-        {/* Agent 列表 */}
-        <Card className="mb-6">
-          <Title>Agent 状态</Title>
-          <Table className="mt-4">
-            <TableHead>
-              <TableRow>
-                <TableHeaderCell>Agent ID</TableHeaderCell>
-                <TableHeaderCell>名称</TableHeaderCell>
-                <TableHeaderCell>状态</TableHeaderCell>
-                <TableHeaderCell>内存</TableHeaderCell>
-                <TableHeaderCell>CPU</TableHeaderCell>
-                <TableHeaderCell>最后更新</TableHeaderCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {agents.map((agent) => (
-                <TableRow key={agent.agent_id}>
-                  <TableCell>{agent.agent_id}</TableCell>
-                  <TableCell>{agent.agent_name || '-'}</TableCell>
-                  <TableCell>
-                    <Badge color={agent.status === 'online' ? 'green' : 'red'}>
-                      {agent.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{agent.latest_memory ? `${agent.latest_memory.toFixed(1)} MB` : '-'}</TableCell>
-                  <TableCell>{agent.latest_cpu ? `${agent.latest_cpu.toFixed(1)}%` : '-'}</TableCell>
-                  <TableCell>{agent.last_seen ? new Date(agent.last_seen).toLocaleString() : '-'}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Card>
-
-        {/* 告警列表 */}
-        <Card>
-          <Title>活跃告警</Title>
-          {alerts.length === 0 ? (
-            <Text className="mt-4">暂无活跃告警</Text>
-          ) : (
-            <Table className="mt-4">
-              <TableHead>
-                <TableRow>
-                  <TableHeaderCell>类型</TableHeaderCell>
-                  <TableHeaderCell>严重程度</TableHeaderCell>
-                  <TableHeaderCell>标题</TableHeaderCell>
-                  <TableHeaderCell>时间</TableHeaderCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {alerts.map((alert) => (
-                  <TableRow key={alert.id}>
-                    <TableCell>{alert.alert_type}</TableCell>
-                    <TableCell>
-                      <Badge 
-                        color={alert.severity === 'critical' ? 'red' : alert.severity === 'warning' ? 'yellow' : 'blue'}
-                      >
-                        {alert.severity}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{alert.title}</TableCell>
-                    <TableCell>{new Date(alert.created_at).toLocaleString()}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </Card>
-
-        {/* 错误提示 */}
-        {error && (
-          <Card className="mt-6">
-            <Text color="red">{error}</Text>
-          </Card>
+        {state === 'error' && (
+          <section className="notice-panel">
+            <strong>无法加载监控数据</strong>
+            <span>{error}</span>
+          </section>
         )}
-      </div>
-    </div>
+
+        <section id="overview" className="summary-grid" aria-label="运行概览">
+          <SummaryCard label="CPU" value={formatPercent(realtime?.cpu)} subLabel={metricTone(realtime?.cpu) === 'ok' ? '正常' : metricTone(realtime?.cpu) === 'warning' ? '偏高' : '高负载'} tone={metricTone(realtime?.cpu)} progress={realtime?.cpu} />
+          <SummaryCard label="内存" value={formatPercent(realtime?.memory)} subLabel={metricTone(realtime?.memory) === 'ok' ? '正常' : metricTone(realtime?.memory) === 'warning' ? '偏高' : '高占用'} tone={metricTone(realtime?.memory)} progress={realtime?.memory} />
+          <SummaryCard label="磁盘" value={formatPercent(realtime?.disk)} subLabel={metricTone(realtime?.disk, 70, 90) === 'ok' ? '正常' : metricTone(realtime?.disk, 70, 90) === 'warning' ? '关注' : '紧张'} tone={metricTone(realtime?.disk, 70, 90)} progress={realtime?.disk} />
+          <SummaryCard label="Gateway" value={realtime?.gateway_status ? '在线' : '离线'} subLabel={realtime?.gateway_status ? '可用' : '异常'} tone={gatewayTone} progress={realtime?.gateway_status ? 100 : 0} />
+        </section>
+
+        <section className="panel trend-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Metrics</p>
+              <h2>24 小时趋势</h2>
+            </div>
+            <span>{history.length} 个采样点</span>
+          </div>
+          <TrendChart data={history} />
+        </section>
+
+        <section className="main-grid">
+          <section id="agents" className="panel">
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">Agents</p>
+                <h2>Agent 状态</h2>
+              </div>
+              <span>{agents.length} 个 Agent</span>
+            </div>
+            <AgentTable agents={agents} />
+          </section>
+
+          <section id="alerts" className="panel">
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">Alerts</p>
+                <h2>活跃告警</h2>
+              </div>
+              <span>{alerts.length} 条</span>
+            </div>
+            <AlertList alerts={alerts} />
+          </section>
+        </section>
+
+        <section id="runtime" className="panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Runtime</p>
+              <h2>配置与接入状态</h2>
+            </div>
+            <span>{runtime?.app_name || 'OC-Monitor'}</span>
+          </div>
+          <ConfigStrip runtime={runtime} stats={stats} />
+        </section>
+      </section>
+    </main>
   )
 }
 
